@@ -33,6 +33,7 @@ namespace PurchaseDemo
         {
             SaleToPOIMessage request = null;
             bool result = false;
+            string displayString;
             try
             {
                 request = await fusionClient.SendAsync(paymentRequest);
@@ -44,7 +45,20 @@ namespace PurchaseDemo
                     switch (MessagePayload)
                     {
                         case LoginResponse r: // Autologin must have been sent
-                            Console.WriteLine($"AutoLogin result = {r.Response?.Result.ToString() ?? "Unknown"}, ErrorCondition = {r.Response?.ErrorCondition}, Result = {r.Response?.AdditionalResponse}");
+                            displayString = $"Auto Login result = {r.Response.Result}";
+                            if (r.Response.Result != Result.Success && r.Response.Result != Result.Partial)
+                            {
+                                displayString += $", ErrorCondition = {r.Response?.ErrorCondition}, Result = {r.Response?.AdditionalResponse}";
+                            }
+                            Console.WriteLine(displayString);
+                            break;
+
+                        case DisplayRequest r:
+                            var cashierDisplay = r.GetCashierDisplayAsPlainText();
+                            if (cashierDisplay != null)
+                            {
+                                Console.WriteLine($"CASHIER DISPLAY [{cashierDisplay}]");
+                            }
                             break;
 
                         case PaymentResponse r:
@@ -54,7 +68,20 @@ namespace PurchaseDemo
                                 Console.WriteLine($"Unknown SaleId {r.SaleData.SaleTransactionID.TransactionID}");
                                 break;
                             }
-                            Console.WriteLine($"Payment result = {r.Response.Result.ToString() ?? "Unknown"}, ErrorCondition = {r.Response?.ErrorCondition}, Result = {r.Response?.AdditionalResponse}");
+
+                            displayString = $"Payment result = {r.Response.Result}";
+                            if (r.Response.Result != Result.Success && r.Response.Result != Result.Partial)
+                            {
+                                displayString += $", ErrorCondition = {r.Response?.ErrorCondition}, Result = {r.Response?.AdditionalResponse}";
+                            }
+                            Console.WriteLine(displayString);
+
+                            var saleReceipt = r.GetReceiptAsPlainText(DocumentQualifier.SaleReceipt);
+                            if (saleReceipt != null)
+                            {
+                                Console.WriteLine($"Sale receipt = {Environment.NewLine}{saleReceipt}");
+                            }
+
                             result = (r.Response.Result == Result.Success) || (r.Response.Result == Result.Partial);
                             waitingForResponse = false;
                             break;

@@ -19,7 +19,6 @@ namespace PurchaseDemo
         private TransactionStatusResponse transactionStatusResponse;
 
         private ManualResetEvent paymentResponseReceived;
-        private readonly ManualResetEvent loginResponseReceived;
         private readonly ManualResetEvent transactionStatusResponseReceived;
 
         public PurchaseDemoEvents(string saleID, string poiID, string kek, LoginRequest loginRequest)
@@ -38,10 +37,26 @@ namespace PurchaseDemo
             fusionClient.OnLoginResponse += FusionClient_OnLoginResponse;
             fusionClient.OnPaymentResponse += FusionClient_OnPaymentResponse;
             fusionClient.OnTransactionStatusResponse += FusionClient_OnTransactionStatusResponse;
+            fusionClient.OnReconciliationResponse += FusionClient_OnReconciliationResponse;
+            fusionClient.OnDisplayRequest += FusionClient_OnDisplayRequest;
 
             paymentResponseReceived = new ManualResetEvent(false);
-            loginResponseReceived = new ManualResetEvent(false);
             transactionStatusResponseReceived = new ManualResetEvent(false);
+        }
+
+        private void FusionClient_OnDisplayRequest(object sender, MessagePayloadEventArgs<DisplayRequest> e)
+        {
+            Console.WriteLine("OnDisplayRequest");
+            var cashierDisplay = e.MessagePayload.GetCashierDisplayAsPlainText();
+            if(cashierDisplay != null)
+            {
+                Console.WriteLine($"CASHIER DISPLAY [{cashierDisplay}]");
+            }
+        }
+
+        private void FusionClient_OnReconciliationResponse(object sender, MessagePayloadEventArgs<ReconciliationResponse> e)
+        {
+            Console.WriteLine("OnReconciliationResponse");
         }
 
         private void FusionClient_OnTransactionStatusResponse(object sender, MessagePayloadEventArgs<TransactionStatusResponse> e)
@@ -60,7 +75,6 @@ namespace PurchaseDemo
         {
             Console.WriteLine("OnDisconnect");
             paymentResponseReceived.Set();
-            loginResponseReceived.Set();
             transactionStatusResponseReceived.Set();
         }
 
@@ -68,7 +82,6 @@ namespace PurchaseDemo
         {
             Console.WriteLine("OnConnectError");
             paymentResponseReceived.Set();
-            loginResponseReceived.Set();
             transactionStatusResponseReceived.Set();
         }
 
@@ -80,15 +93,18 @@ namespace PurchaseDemo
         private void FusionClient_OnLoginResponse(object sender, MessagePayloadEventArgs<LoginResponse> e)
         {
             var r = e.MessagePayload;
-            Console.WriteLine($"AutoLogin result = {r.Response?.Result.ToString() ?? "Unknown"}, ErrorCondition = {r.Response?.ErrorCondition}, Result = {r.Response?.AdditionalResponse}");
 
-            loginResponseReceived.Set();
+            var s = $"Auto Login result = {r.Response.Result}";
+            if (r.Response.Result != Result.Success && r.Response.Result != Result.Partial)
+            {
+                s += $", ErrorCondition = {r.Response?.ErrorCondition}, Result = {r.Response?.AdditionalResponse}";
+            }
+            Console.WriteLine(s);
         }
 
         private void FusionClient_OnPaymentResponse(object sender, MessagePayloadEventArgs<PaymentResponse> e)
         {
             var r = e.MessagePayload;
-
             // Validate SaleTransactionID
             if (!r.SaleData.SaleTransactionID.Equals(saleTransactionID))
             {
@@ -96,7 +112,19 @@ namespace PurchaseDemo
                 return;
             }
 
-            Console.WriteLine($"Payment result = {r.Response.Result.ToString() ?? "Unknown"}, ErrorCondition = {r.Response?.ErrorCondition}, Result = {r.Response?.AdditionalResponse}");
+            var s = $"Payment result = {r.Response.Result}";
+            if (r.Response.Result != Result.Success && r.Response.Result != Result.Partial)
+            {
+                s += $", ErrorCondition = {r.Response?.ErrorCondition}, Result = {r.Response?.AdditionalResponse}";
+            }
+            Console.WriteLine(s);
+
+            var saleReceipt = r.GetReceiptAsPlainText(DocumentQualifier.SaleReceipt);
+            if(saleReceipt != null)
+            {
+                Console.WriteLine($"Sale receipt = {Environment.NewLine}{saleReceipt}");
+            }
+
             paymentResult = (r.Response.Result == Result.Success) || (r.Response.Result == Result.Partial);
             paymentResponseReceived.Set();
         }
@@ -109,20 +137,15 @@ namespace PurchaseDemo
         public bool DoPayment(PaymentRequest paymentRequest)
         {
             paymentResponseReceived.Reset();
-            loginResponseReceived.Reset();
             transactionStatusResponseReceived.Reset();
 
             SaleToPOIMessage request = null;
             saleTransactionID = paymentRequest.SaleData.SaleTransactionID;
-            bool paymentResult = false;
             TimeSpan timeout = TimeSpan.FromSeconds(60);
             try
             {
                 // Connect
                 fusionClient.ConnectAsync().Wait(timeout);
-                // Login
-                fusionClient.SendAsync(fusionClient.LoginRequest).Wait(timeout);
-                loginResponseReceived.WaitOne(timeout);
                 // Payment
                 var task = fusionClient.SendAsync(paymentRequest);
                 if (task.Wait(timeout))

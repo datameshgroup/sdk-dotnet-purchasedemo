@@ -4,9 +4,10 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.Threading;
 using System.Threading.Tasks;
 
-namespace PurchaseDemoAsync_4_5_2
+namespace PurchaseDemo_NET472
 {
     public class PurchaseDemoAsync : IDisposable
     {
@@ -32,6 +33,7 @@ namespace PurchaseDemoAsync_4_5_2
         {
             SaleToPOIMessage request = null;
             bool result = false;
+            string displayString;
             try
             {
                 request = await fusionClient.SendAsync(paymentRequest);
@@ -43,7 +45,20 @@ namespace PurchaseDemoAsync_4_5_2
                     switch (MessagePayload)
                     {
                         case LoginResponse r: // Autologin must have been sent
-                            Console.WriteLine($"AutoLogin result = {r.Response?.Result.ToString() ?? "Unknown"}, ErrorCondition = {r.Response?.ErrorCondition}, Result = {r.Response?.AdditionalResponse}");
+                            displayString = $"Auto Login result = {r.Response.Result}";
+                            if (r.Response.Result != Result.Success && r.Response.Result != Result.Partial)
+                            {
+                                displayString += $", ErrorCondition = {r.Response?.ErrorCondition}, Result = {r.Response?.AdditionalResponse}";
+                            }
+                            Console.WriteLine(displayString);
+                            break;
+
+                        case DisplayRequest r:
+                            var cashierDisplay = r.GetCashierDisplayAsPlainText();
+                            if (cashierDisplay != null)
+                            {
+                                Console.WriteLine($"CASHIER DISPLAY [{cashierDisplay}]");
+                            }
                             break;
 
                         case PaymentResponse r:
@@ -53,7 +68,20 @@ namespace PurchaseDemoAsync_4_5_2
                                 Console.WriteLine($"Unknown SaleId {r.SaleData.SaleTransactionID.TransactionID}");
                                 break;
                             }
-                            Console.WriteLine($"Payment result = {r.Response.Result.ToString() ?? "Unknown"}, ErrorCondition = {r.Response?.ErrorCondition}, Result = {r.Response?.AdditionalResponse}");
+
+                            displayString = $"Payment result = {r.Response.Result}";
+                            if (r.Response.Result != Result.Success && r.Response.Result != Result.Partial)
+                            {
+                                displayString += $", ErrorCondition = {r.Response?.ErrorCondition}, Result = {r.Response?.AdditionalResponse}";
+                            }
+                            Console.WriteLine(displayString);
+
+                            var saleReceipt = r.GetReceiptAsPlainText(DocumentQualifier.SaleReceipt);
+                            if (saleReceipt != null)
+                            {
+                                Console.WriteLine($"Sale receipt = {Environment.NewLine}{saleReceipt}");
+                            }
+
                             result = (r.Response.Result == Result.Success) || (r.Response.Result == Result.Partial);
                             waitingForResponse = false;
                             break;
@@ -116,7 +144,7 @@ namespace PurchaseDemoAsync_4_5_2
                     {
                         Response paymentResponse = transactionStatusResponse.RepeatedMessageResponse.RepeatedResponseMessageBody.PaymentResponse.Response;
                         Console.WriteLine($"Payment result = {paymentResponse.Result.ToString() ?? "Unknown"}, ErrorCondition = {paymentResponse?.ErrorCondition}, Result = {paymentResponse?.AdditionalResponse}");
-                        result = paymentResponse.Success;
+                        result = (paymentResponse.Result == Result.Success) || (paymentResponse.Result == Result.Partial);
                         waitingForResponse = false;
                     }
 
@@ -159,7 +187,7 @@ namespace PurchaseDemoAsync_4_5_2
 
     class Program
     {
-        static async Task Main(string[] args)
+        private static async Task Main(string[] args)
         {
             // POS identification provided by DataMesh
             string saleID = args[0]; // Replace with your test SaleId provided by DataMesh
