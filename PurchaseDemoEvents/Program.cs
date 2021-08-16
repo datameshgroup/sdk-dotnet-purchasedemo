@@ -271,22 +271,8 @@ namespace PurchaseDemo
 
             // Build payment request
             decimal amount = 42.00M;
-            PaymentRequest paymentRequest = new PaymentRequest(
-                transactionID: DateTime.UtcNow.ToString("yyyyMMddhhmmssffff", CultureInfo.InvariantCulture),
-                requestedAmount: amount,
-                saleItems: new List<SaleItem>()
-                {
-                    new SaleItem()
-                    {
-                        ItemID = "1",
-                        ProductCode = "1",
-                        ProductLabel = "Product",
-                        Quantity = 1,
-                        UnitOfMeasure = UnitOfMeasure.Other,
-                        ItemAmount = amount,
-                        UnitPrice = amount
-                    }
-                });
+            PaymentRequest paymentRequest = new PaymentRequest(transactionID: DateTime.UtcNow.ToString("yyyyMMddhhmmssffff", CultureInfo.InvariantCulture), requestedAmount: amount);
+            paymentRequest.AddSaleItem(productCode: "XXYYZZ123", productLabel: "Name of product", itemAmount: amount);
 
             try
             {
