@@ -5,10 +5,11 @@
     <TargetFramework>net5.0</TargetFramework>
     <Company>DataMesh Group</Company>
     <Authors>Clinton Dean</Authors>
+    <Version>1.0.1</Version>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="DataMeshGroup.Fusion.FusionClient" Version="1.0.6" />
+    <PackageReference Include="DataMeshGroup.Fusion.FusionClient" Version="1.0.8" />
   </ItemGroup>
 
 </Project>
