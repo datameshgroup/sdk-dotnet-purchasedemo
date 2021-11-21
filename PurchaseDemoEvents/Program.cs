@@ -23,7 +23,7 @@ namespace PurchaseDemo
 
         public PurchaseDemoEvents(string saleID, string poiID, string kek, LoginRequest loginRequest)
         {
-            fusionClient = new FusionClient(true)
+            fusionClient = new FusionClient(useTestEnvironment: true)
             {
                 SaleID = saleID,
                 POIID = poiID,
