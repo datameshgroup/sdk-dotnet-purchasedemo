@@ -21,6 +21,10 @@ namespace PurchaseDemo
         private ManualResetEvent paymentResponseReceived;
         private readonly ManualResetEvent transactionStatusResponseReceived;
 
+        private SaleToPOIMessage currentRequest = null;
+
+        private bool handlingErrorRecovery = false;
+
         public PurchaseDemoEvents(string saleID, string poiID, string kek, LoginRequest loginRequest)
         {
             fusionClient = new FusionClient(useTestEnvironment: true)
@@ -74,6 +78,8 @@ namespace PurchaseDemo
         private void FusionClient_OnDisconnect(object sender, EventArgs e)
         {
             Console.WriteLine("OnDisconnect");
+            if(!handlingErrorRecovery && (currentRequest != null))                
+                paymentResult = HandleErrorRecovery(true); // process error handling
             paymentResponseReceived.Set();
             transactionStatusResponseReceived.Set();
         }
@@ -127,6 +133,7 @@ namespace PurchaseDemo
 
             paymentResult = (r.Response.Result == Result.Success) || (r.Response.Result == Result.Partial);
             paymentResponseReceived.Set();
+            currentRequest = null;
         }
 
         public void Dispose()
@@ -139,7 +146,9 @@ namespace PurchaseDemo
             paymentResponseReceived.Reset();
             transactionStatusResponseReceived.Reset();
 
-            SaleToPOIMessage request = null;
+            currentRequest = null;
+            handlingErrorRecovery = false;
+
             saleTransactionID = paymentRequest.SaleData.SaleTransactionID;
             TimeSpan timeout = TimeSpan.FromSeconds(60);
             try
@@ -148,19 +157,18 @@ namespace PurchaseDemo
                 fusionClient.ConnectAsync().Wait(timeout);
                 // Payment
                 var task = fusionClient.SendAsync(paymentRequest);
+                currentRequest = task.Result;
                 if (task.Wait(timeout))
                 {
-                    request = task.Result;
                     paymentResponseReceived.WaitOne();
                 }
             }
             catch (FusionException fe)
             {
                 Console.WriteLine($"Exception processing payment {fe.Message} {fe.StackTrace}");
-                if (fe.ErrorRecoveryRequired && request != null)
-                {
-                    // process error handling
-                    paymentResult = HandleErrorRecovery(request);
+                if (fe.ErrorRecoveryRequired && !handlingErrorRecovery && (currentRequest != null))
+                {                    
+                    paymentResult = HandleErrorRecovery(); // process error handling
                 }
             }
             catch (Exception e)
@@ -171,16 +179,25 @@ namespace PurchaseDemo
             return paymentResult;
         }
 
-        private bool HandleErrorRecovery(SaleToPOIMessage request)
+        private bool HandleErrorRecovery(bool pauseBeforeRequest = false)
         {
+            if(currentRequest == null)
+            {
+                Console.WriteLine($"Error recovery not necessary since no current request.");
+                return true;
+            }
+
+            handlingErrorRecovery = true;
+
             Console.WriteLine($"Error recovery...");
 
             bool result = false;
 
             TimeSpan timeout = TimeSpan.FromSeconds(60);
             TimeSpan requestDelay = TimeSpan.FromSeconds(10);
-            Stopwatch timeoutTimer = new Stopwatch();
-            timeoutTimer.Start();
+            
+            if(pauseBeforeRequest)
+                Thread.Sleep(requestDelay);
 
             bool waitingForResponse = true;
             do
@@ -189,15 +206,18 @@ namespace PurchaseDemo
                 {
                     MessageReference = new MessageReference()
                     {
-                        MessageCategory = request.MessageHeader.MessageCategory,
-                        POIID = request.MessageHeader.POIID,
-                        SaleID = request.MessageHeader.SaleID,
-                        ServiceID = request.MessageHeader.ServiceID
+                        MessageCategory = currentRequest.MessageHeader.MessageCategory,
+                        POIID = currentRequest.MessageHeader.POIID,
+                        SaleID = currentRequest.MessageHeader.SaleID,
+                        ServiceID = currentRequest.MessageHeader.ServiceID
                     }
                 };
 
                 try
                 {
+                    Stopwatch timeoutTimer = new Stopwatch();
+                    timeoutTimer.Start();
+
                     if (fusionClient.SendAsync(transactionStatusRequest).Wait(timeout))
                     {
                         if (transactionStatusResponseReceived.WaitOne(timeout))
@@ -211,6 +231,7 @@ namespace PurchaseDemo
                                 Console.WriteLine($"Payment result = {paymentResponse.Result.ToString() ?? "Unknown"}, ErrorCondition = {paymentResponse?.ErrorCondition}, Result = {paymentResponse?.AdditionalResponse}");
                                 result = paymentResponse.Result is Result.Success or Result.Partial;
                                 waitingForResponse = false;
+                                currentRequest = null;
                             }
 
                             // else check if the transaction is still in progress, and we haven't reached out timeout
@@ -223,6 +244,7 @@ namespace PurchaseDemo
                             else
                             {
                                 waitingForResponse = false;
+                                currentRequest = null;
                             }
                         }
                     }
@@ -242,11 +264,12 @@ namespace PurchaseDemo
 
                 if (waitingForResponse)
                 {
-                    System.Threading.Thread.Sleep(requestDelay);
+                    Thread.Sleep(requestDelay);
                 }
 
             } while (waitingForResponse);
 
+            handlingErrorRecovery = false;
 
             return result;
         }
